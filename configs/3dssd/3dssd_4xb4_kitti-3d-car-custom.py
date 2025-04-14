@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/models/3dssd.py', '../_base_/datasets/kitti-3d-car.py',
+    '../_base_/models/3dssd-custom.py', '../_base_/datasets/kitti-3d-car.py',
     '../_base_/default_runtime.py'
 ]
 
@@ -83,7 +83,7 @@ test_pipeline = [
 ]
 
 train_dataloader = dict(
-    batch_size=2, dataset=dict(dataset=dict(pipeline=train_pipeline, )))
+    batch_size=2, dataset=dict(dataset=dict(pipeline=train_pipeline)))
 test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
