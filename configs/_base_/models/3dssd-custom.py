@@ -11,7 +11,8 @@ model = dict(
         enc_num_head=(2, 4, 8, 16, 32),
         enc_patch_size=(1024, 1024, 1024, 1024, 1024),
         dec_depths=(2, 2, 2, 2),
-        dec_channels=(64, 64, 128, 256),
+        #输出通道dec_channels[0]
+        dec_channels=(256, 64, 128, 256),
         dec_num_head=(4, 4, 8, 16),
         dec_patch_size=(1024, 1024, 1024, 1024),
         mlp_ratio=4,
@@ -37,7 +38,8 @@ model = dict(
     bbox_head=dict(
         type='SSD3DHead',
         vote_module_cfg=dict(
-            in_channels=64,
+            #backbone输出通道数，head输入通道数
+            in_channels=256,
             num_points=256,
             gt_per_seed=1,
             conv_channels=(128,),
@@ -50,7 +52,7 @@ model = dict(
             num_point=256,
             radii=(4.8, 6.4),
             sample_nums=(16, 32),
-            mlp_channels=((64, 256, 256, 512), (64, 256, 512, 1024)),
+            mlp_channels=((256, 256, 256, 512), (256, 256, 512, 1024)),
             norm_cfg=dict(type='BN2d', eps=1e-3, momentum=0.1),
             use_xyz=True,
             normalize_xyz=False,

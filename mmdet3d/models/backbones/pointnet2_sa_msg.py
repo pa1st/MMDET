@@ -184,6 +184,7 @@ class PointNet2SAMSG(BasePointNet):
                 out_sa_xyz.append(sa_xyz[-1])
                 out_sa_features.append(sa_features[-1])
                 out_sa_indices.append(sa_indices[-1])
+        # print(out_sa_features[4].shape)  #[2,1024,64]
         res = dict(
             sa_xyz=out_sa_xyz,
             sa_features=out_sa_features,

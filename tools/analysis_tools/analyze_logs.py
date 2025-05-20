@@ -33,11 +33,103 @@ def cal_train_time(log_dicts, args):
         print(f'average iter time: {np.mean(epoch_ave_time):.4f} s/iter\n')
 
 
+# def plot_curve(log_dicts, args):
+#     if args.backend is not None:
+#         plt.switch_backend(args.backend)
+#     sns.set_style(args.style)
+#     # if legend is None, use {filename}_{key} as legend
+#     legend = args.legend
+#     if legend is None:
+#         legend = []
+#         for json_log in args.json_logs:
+#             for metric in args.keys:
+#                 legend.append(f'{json_log}_{metric}')
+#     assert len(legend) == (len(args.json_logs) * len(args.keys))
+#     metrics = args.keys
+#
+#     num_metrics = len(metrics)
+#     for i, log_dict in enumerate(log_dicts):
+#         epochs = list(log_dict.keys())
+#         for j, metric in enumerate(metrics):
+#             print(f'plot curve of {args.json_logs[i]}, metric is {metric}')
+#             if metric not in log_dict[epochs[int(args.eval_interval) - 1]]:
+#                 if args.eval:
+#                     raise KeyError(
+#                         f'{args.json_logs[i]} does not contain metric '
+#                         f'{metric}. Please check if "--no-validate" is '
+#                         'specified when you trained the model. Or check '
+#                         f'if the eval_interval {args.eval_interval} in args '
+#                         'is equal to the `eval_interval` during training.')
+#                 raise KeyError(
+#                     f'{args.json_logs[i]} does not contain metric {metric}. '
+#                     'Please reduce the log interval in the config so that '
+#                     'interval is less than iterations of one epoch.')
+#
+#             if args.eval:
+#                 xs = []
+#                 ys = []
+#                 for epoch in epochs:
+#                     ys += log_dict[epoch][metric]
+#                     if log_dict[epoch][metric]:
+#                         xs += [epoch]
+#                 plt.xlabel('epoch')
+#                 plt.plot(xs, ys, label=legend[i * num_metrics + j], marker='o')
+#             else:
+#                 xs = []
+#                 ys = []
+#                 for epoch in epochs:
+#                     iters = log_dict[epoch]['step']
+#                     xs.append(np.array(iters))
+#                     ys.append(np.array(log_dict[epoch][metric][:len(iters)]))
+#                 xs = np.concatenate(xs)
+#                 ys = np.concatenate(ys)
+#                 plt.xlabel('iter')
+#                 plt.plot(
+#                     xs, ys, label=legend[i * num_metrics + j], linewidth=0.5)
+#                 plt.legend()
+#         if args.title is not None:
+#             plt.title(args.title)
+#     if args.out is None:
+#         plt.show()
+#     else:
+#         print(f'save curve to: {args.out}')
+#         plt.savefig(args.out)
+#         plt.cla()
 def plot_curve(log_dicts, args):
     if args.backend is not None:
         plt.switch_backend(args.backend)
-    sns.set_style(args.style)
-    # if legend is None, use {filename}_{key} as legend
+
+    high_contrast_palette = [
+        "#4477AA",  # 蓝
+        "#CC6677",  # 红
+        "#117733",  # 绿
+        "#DDCC77",  # 黄
+        "#88CCEE",  # 浅蓝
+        "#AA4499",  # 紫
+    ]
+
+    sns.set_theme(style="whitegrid", font_scale=1.2)
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial"],
+        "axes.edgecolor": "#CCCCCC",
+        "axes.linewidth": 1.2,
+        "axes.grid": True,
+        "grid.color": "#EEEEEE",
+        "grid.linestyle": "--",
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.color": "#333333",
+        "ytick.color": "#333333",
+        "axes.labelcolor": "#222222",
+        "axes.titlesize": 14,
+        "legend.frameon": False,
+        "legend.fontsize": 10
+    })
+
+
+    plt.figure(figsize=(13, 6), dpi=130)
+
     legend = args.legend
     if legend is None:
         legend = []
@@ -45,57 +137,69 @@ def plot_curve(log_dicts, args):
             for metric in args.keys:
                 legend.append(f'{json_log}_{metric}')
     assert len(legend) == (len(args.json_logs) * len(args.keys))
-    metrics = args.keys
 
+    metrics = args.keys
     num_metrics = len(metrics)
+
+    color_idx = 0
     for i, log_dict in enumerate(log_dicts):
         epochs = list(log_dict.keys())
         for j, metric in enumerate(metrics):
-            print(f'plot curve of {args.json_logs[i]}, metric is {metric}')
+            print(f'Plotting: {args.json_logs[i]}, Metric: {metric}')
             if metric not in log_dict[epochs[int(args.eval_interval) - 1]]:
-                if args.eval:
-                    raise KeyError(
-                        f'{args.json_logs[i]} does not contain metric '
-                        f'{metric}. Please check if "--no-validate" is '
-                        'specified when you trained the model. Or check '
-                        f'if the eval_interval {args.eval_interval} in args '
-                        'is equal to the `eval_interval` during training.')
-                raise KeyError(
-                    f'{args.json_logs[i]} does not contain metric {metric}. '
-                    'Please reduce the log interval in the config so that '
-                    'interval is less than iterations of one epoch.')
+                raise KeyError(f'Missing metric "{metric}" in log file.')
 
+            xs, ys = [], []
             if args.eval:
-                xs = []
-                ys = []
                 for epoch in epochs:
-                    ys += log_dict[epoch][metric]
-                    if log_dict[epoch][metric]:
-                        xs += [epoch]
-                plt.xlabel('epoch')
-                plt.plot(xs, ys, label=legend[i * num_metrics + j], marker='o')
+                    val = log_dict[epoch][metric]
+                    if val:
+                        xs.append(epoch)
+                        ys.append(val[0])
+                plt.xlabel('Epoch')
             else:
-                xs = []
-                ys = []
                 for epoch in epochs:
                     iters = log_dict[epoch]['step']
-                    xs.append(np.array(iters))
-                    ys.append(np.array(log_dict[epoch][metric][:len(iters)]))
-                xs = np.concatenate(xs)
-                ys = np.concatenate(ys)
-                plt.xlabel('iter')
-                plt.plot(
-                    xs, ys, label=legend[i * num_metrics + j], linewidth=0.5)
-                plt.legend()
-        if args.title is not None:
-            plt.title(args.title)
+                    val = log_dict[epoch][metric][:len(iters)]
+                    xs.extend(iters)
+                    ys.extend(val)
+                plt.xlabel('Iteration')
+
+            # 使用高区分度颜色，线条略粗
+            color = high_contrast_palette[color_idx % len(high_contrast_palette)]
+            color_idx += 1
+            plt.plot(
+                xs,
+                ys,
+                label=legend[i * num_metrics + j],
+                color=color,
+                linewidth=2,
+                # marker='o',
+                markersize=4,
+                alpha=0.95
+            )
+
+    if args.title is not None:
+        plt.title(args.title, fontsize=16, fontweight='semibold', color="#222222")
+
+    plt.ylabel('Metric Value')
+    plt.grid(True, linestyle='--', linewidth=0.6, alpha=0.5)
+    plt.tight_layout()
+
+    # 更紧凑的图例显示在右上角
+    plt.legend(
+        loc='upper right',
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=False,
+        fontsize=10
+    )
+
     if args.out is None:
         plt.show()
     else:
-        print(f'save curve to: {args.out}')
-        plt.savefig(args.out)
-        plt.cla()
-
+        print(f'Saving figure to: {args.out}')
+        plt.savefig(args.out, bbox_inches='tight', transparent=True)
+        plt.clf()
 
 def add_plot_parser(subparsers):
     parser_plt = subparsers.add_parser(

@@ -754,6 +754,8 @@ class SerializedUnpooling(PointModule):
         point = self.proj(point)
         parent = self.proj_skip(parent)
         parent.feat = parent.feat + point.feat[inverse]
+        # NOTE: add this line
+        parent.sparse_conv_feat = parent.sparse_conv_feat.replace_feature(parent.feat)
 
         if self.traceable:
             parent["unpooling_parent"] = point
@@ -985,7 +987,7 @@ class PointTransformerV3(PointModule):
         feat = tensor_3d.reshape(-1, feat_num)
         batch = torch.arange(batch_size, device=tensor_3d.device).repeat_interleave(point_num)
         coord = feat[:, :3]
-        grid_size = 0.01
+        grid_size = 0.05
         data_dict= {
             'feat': feat,
             'batch': batch,
@@ -1001,7 +1003,7 @@ class PointTransformerV3(PointModule):
         if not self.cls_mode:
             point = self.dec(point)
         sa_xyz=point['coord'].reshape(batch_size, point_num, 3)
-        sa_features=point['feat'].reshape(batch_size, point_num, 64).permute(0, 2, 1)
+        sa_features=point['feat'].reshape(batch_size, point_num, 256).permute(0, 2, 1)
         sa_indices=torch.arange(0,point_num,1).repeat(2, 1)
         sa_xyz=sa_xyz.contiguous()
         sa_features=sa_features.contiguous()
@@ -1016,115 +1018,3 @@ class PointTransformerV3(PointModule):
         # print(point)
         # print(res)
         return res
-        # return dict(
-        #     sa_xyz=out_sa_xyz,
-        #     sa_features=out_sa_features,
-        #     sa_indices=out_sa_indices)
-        # # 从PTV3输出中提取数据
-        # feat = point['feat']  # 点特征
-        # coord = point['coord']  # 点坐标
-        # batch = point['batch']  # 批次索引
-        #
-        # # 创建输出结构
-        # sa_xyz = []
-        # sa_features = []
-        # sa_indices = []
-        #
-        # # 第一层 - 将坐标按批次重组
-        # batch_coords = []
-        # for b in range(batch_size):
-        #     mask = (batch == b)
-        #     # 获取该批次的所有点
-        #     coords_b = coord[mask]
-        #     batch_coords.append(coords_b)
-        #
-        # # 确保所有批次有相同数量的点（如有必要进行填充）
-        # max_points = max([coords.shape[0] for coords in batch_coords])
-        # for b in range(batch_size):
-        #     if batch_coords[b].shape[0] < max_points:
-        #         padding = torch.zeros(
-        #             (max_points - batch_coords[b].shape[0], 3),
-        #             device=coord.device,
-        #             dtype=coord.dtype
-        #         )
-        #         batch_coords[b] = torch.cat([batch_coords[b], padding], dim=0)
-        #
-        # # 堆叠为单个tensor并添加到sa_xyz
-        # stacked_coords = torch.stack(batch_coords)
-        # sa_xyz.append(stacked_coords)
-        #
-        # # 第一层特征 - 可以使用简单的固定特征或者从PTV3提取
-        # batch_feats_layer1 = []
-        # for b in range(batch_size):
-        #     mask = (batch == b)
-        #     feats_b = feat[mask]
-        #
-        #     # 确保尺寸一致
-        #     if feats_b.shape[0] < max_points:
-        #         padding = torch.zeros(
-        #             (max_points - feats_b.shape[0], feats_b.shape[1]),
-        #             device=feat.device,
-        #             dtype=feat.dtype
-        #         )
-        #         feats_b = torch.cat([feats_b, padding], dim=0)
-        #
-        #     # 添加通道维度 (为匹配PointNet++格式)
-        #     batch_feats_layer1.append(feats_b.unsqueeze(0))
-        #
-        # # 堆叠特征并添加到sa_features
-        # stacked_feats_layer1 = torch.cat(batch_feats_layer1, dim=0)
-        # sa_features.append(stacked_feats_layer1)
-        #
-        # # 第一层索引
-        # indices_layer1 = torch.arange(max_points, device=coord.device).unsqueeze(0).repeat(batch_size, 1)
-        # sa_indices.append(indices_layer1)
-        #
-        # # 第二层 - 模拟PointNet++的降采样层
-        # # 这里我们可以使用PTV3的sparse_conv_feat或其他下采样方法
-        #
-        # # 为简单起见，我们在此使用与第一层相同的坐标
-        # sa_xyz.append(stacked_coords)
-        #
-        # # # 第二层特征 - 可以使用PTV3的特征
-        # # # 如果有sparse_conv_feat，可以利用它
-        # # if hasattr(point('sparse_conv_feat', None), 'features'):
-        # #     sparse_feat = point['sparse_conv_feat'].features
-        # #
-        # #     # 根据批次重组特征
-        # #     batch_feats_layer2 = []
-        # #     for b in range(batch_size):
-        # #         # 这里的逻辑取决于PTV3如何组织sparse_conv_feat
-        # #         # 下面是一个简化示例
-        # #         start_idx = b * (sparse_feat.shape[0] // batch_size)
-        # #         end_idx = (b + 1) * (sparse_feat.shape[0] // batch_size)
-        # #         feats_b = sparse_feat[start_idx:end_idx]
-        # #
-        # #         # 确保尺寸一致
-        # #         if feats_b.shape[0] < max_points:
-        # #             padding = torch.zeros(
-        # #                 (max_points - feats_b.shape[0], feats_b.shape[1]),
-        # #                 device=sparse_feat.device,
-        # #                 dtype=sparse_feat.dtype
-        # #             )
-        # #             feats_b = torch.cat([feats_b, padding], dim=0)
-        # #
-        # #         batch_feats_layer2.append(feats_b)
-        # #
-        # #     stacked_feats_layer2 = torch.stack(batch_feats_layer2)
-        # # else:
-        # #     # 使用原始特征的不同处理方式
-        # stacked_feats_layer2 = stacked_feats_layer1
-        #
-        # sa_features.append(stacked_feats_layer2)
-        #
-        # # 第二层索引 - 可以生成新的下采样索引或复用第一层
-        # sa_indices.append(indices_layer1)
-        #
-        # # 创建最终的输出字典
-        # pointnet_format_output = {
-        #     'sa_xyz': sa_xyz,
-        #     'sa_features': sa_features,
-        #     'sa_indices': sa_indices
-        # }
-        # print(pointnet_format_output)
-        # return pointnet_format_output

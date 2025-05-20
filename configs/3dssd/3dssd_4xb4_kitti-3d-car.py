@@ -5,7 +5,7 @@ _base_ = [
 
 # dataset settings
 dataset_type = 'KittiDataset'
-data_root = 'data/kitti/'
+data_root = 'data/kitti_tiny/'
 class_names = ['Car']
 point_cloud_range = [0, -40, -5, 70, 40, 3]
 input_modality = dict(use_lidar=True, use_camera=False)
@@ -103,7 +103,7 @@ optim_wrapper = dict(
 )
 
 # training schedule for 1x
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=10, val_interval=2)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=40, val_interval=20)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 

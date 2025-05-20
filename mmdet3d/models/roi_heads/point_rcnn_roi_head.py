@@ -225,6 +225,7 @@ class PointRCNNRoIHead(Base3DRoIHead):
         bbox_results = dict(cls_score=cls_score, bbox_pred=bbox_pred)
         return bbox_results
 
+    @torch.no_grad()
     def _assign_and_sample(
             self, rpn_results_list: InstanceList,
             batch_gt_instances_3d: InstanceList,

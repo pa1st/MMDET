@@ -1094,6 +1094,84 @@ class PointSample(BaseTransform):
         else:
             return points[choices]
 
+    # def fps(self,coords,num_samples):
+    #     n_points = coords.shape[0]
+    #     if n_points <= num_samples:
+    #         return torch.arange(n_points)
+    #     selected_indices = []
+    #     # 随机选择第一个点
+    #     first_idx = np.random.randint(n_points)
+    #     selected_indices.append(first_idx)
+    #     distances = np.linalg.norm(coords - coords[first_idx], axis=1)
+    #     for _ in range(1, num_samples):
+    #         # 选择距离最远的点
+    #         farthest_idx = np.argmax(distances)
+    #         selected_indices.append(farthest_idx)
+    #
+    #         # 更新距离数组
+    #         new_dist = np.linalg.norm(coords - coords[farthest_idx], axis=1)
+    #         distances = np.minimum(distances, new_dist)
+    #
+    #     return np.array(selected_indices)
+    #
+    # def _points_farthest_sampling(
+    #         self,
+    #         points: BasePoints,
+    #         num_samples: Union[int, float],
+    #         sample_range: Optional[float] = None,
+    #         replace: bool = False,
+    #         return_choices: bool = False
+    # ) -> Union[Tuple[BasePoints, np.ndarray], BasePoints]:
+    #     # 处理浮点数类型的采样数量
+    #     if isinstance(num_samples, float):
+    #         assert 0 < num_samples < 1, "Float num_samples must be in (0,1)"
+    #         num_samples = int(np.random.uniform(num_samples, 1.0) * len(points))
+    #
+    #     # 不支持重复采样
+    #     if replace:
+    #         raise NotImplementedError("FPS doesn't support replacement sampling")
+    #
+    #     # 确保采样数量不超过总点数
+    #     num_samples = min(num_samples, len(points))
+    #
+    #     # 处理采样范围约束
+    #     if sample_range is not None:
+    #         # 计算距离并分割远近点
+    #         dist = np.linalg.norm(points.coord.numpy(), axis=1)
+    #         far_inds = np.where(dist >= sample_range)[0]
+    #         near_inds = np.where(dist < sample_range)[0]
+    #
+    #         # 处理远距离点
+    #         if len(far_inds) > num_samples:
+    #             # 随机选择足量远点
+    #             choices = np.random.choice(far_inds, num_samples, replace=False)
+    #         else:
+    #             # 合并远点和近点采样
+    #             far_choices = far_inds
+    #             num_remaining = num_samples - len(far_choices)
+    #
+    #             # 处理近点采样
+    #             if num_remaining > 0:
+    #                 # 调整采样数量避免越界
+    #                 num_remaining = min(num_remaining, len(near_inds))
+    #                 near_coords = points.coord.numpy()[near_inds]
+    #                 near_choices = self.fps(near_coords, num_remaining)
+    #                 choices = np.concatenate([far_choices, near_inds[near_choices]])
+    #             else:
+    #                 choices = far_choices
+    #
+    #             # 打乱顺序保证随机性
+    #             np.random.shuffle(choices)
+    #     else:
+    #         # 全局FPS采样
+    #         all_coords = points.coord.numpy()
+    #         choices = self.fps(all_coords, num_samples)
+    #
+    #     # 返回结果
+    #     if return_choices:
+    #         return points[choices], choices
+    #     return points[choices]
+
     def transform(self, input_dict: dict) -> dict:
         """Transform function to sample points to in indoor scenes.
 
@@ -1111,6 +1189,7 @@ class PointSample(BaseTransform):
             self.sample_range,
             self.replace,
             return_choices=True)
+        # print(points.shape)
         input_dict['points'] = points
 
         pts_instance_mask = input_dict.get('pts_instance_mask', None)

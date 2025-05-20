@@ -58,7 +58,6 @@ class PointNetFPNeck(BaseModule):
         sa_xyz = feat_dict['sa_xyz']
         sa_features = feat_dict['sa_features']
         assert len(sa_xyz) == len(sa_features)
-
         return sa_xyz, sa_features
 
     def forward(self, feat_dict):
@@ -84,6 +83,7 @@ class PointNetFPNeck(BaseModule):
             fp_feature = self.FP_modules[i](sa_xyz[-(i + 2)], sa_xyz[-(i + 1)],
                                             sa_features[-(i + 2)], fp_feature)
             fp_xyz = sa_xyz[-(i + 2)]
-
+        # print(fp_xyz,fp_feature)
+        # print(fp_xyz.shape,fp_feature.shape)
         ret = dict(fp_xyz=fp_xyz, fp_features=fp_feature)
         return ret

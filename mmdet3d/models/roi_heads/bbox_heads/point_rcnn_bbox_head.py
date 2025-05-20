@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from mmcv.cnn import ConvModule
 from mmcv.cnn.bricks import build_conv_layer
 from mmdet.models.utils import multi_apply
@@ -17,6 +18,123 @@ from mmdet3d.registry import MODELS, TASK_UTILS
 from mmdet3d.structures.bbox_3d import (LiDARInstance3DBoxes,
                                         rotation_3d_in_axis, xywhr2xyxyr)
 from mmdet3d.utils.typing_utils import InstanceList, SamplingResultList
+
+
+def knn(x, k):
+    inner = -2 * torch.matmul(x.transpose(2, 1), x)
+    xx = torch.sum(x ** 2, dim=1, keepdim=True)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)
+
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]  # (batch_size, num_points, k)
+    return idx
+
+
+def get_neighbors(x, feature, k=20, idx=None):
+    '''
+        input: x, [B,3,N]
+               feature, [B,C,N]
+        output: neighbor_x, [B,6,N,K]
+                neighbor_feat, [B,2C,N,k]
+    '''
+    batch_size = x.size(0)
+    num_points = x.size(2)
+    x = x.view(batch_size, -1, num_points)
+    if idx is None:
+        idx = knn(x, k=k)  # (batch_size, num_points, k)
+    device = torch.device('cuda')
+
+    idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1) * num_points
+    idx_base = idx_base.type(torch.cuda.LongTensor)
+    idx = idx.type(torch.cuda.LongTensor)
+    idx = idx + idx_base
+    idx = idx.view(-1)
+
+    _, num_dims, _ = x.size()
+
+    x = x.transpose(2,
+                    1).contiguous()  # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
+    neighbor_x = x.view(batch_size * num_points, -1)[idx, :]
+    neighbor_x = neighbor_x.view(batch_size, num_points, k, num_dims)
+    x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
+
+    neighbor_x = torch.cat((neighbor_x - x, x), dim=3).permute(0, 3, 1, 2)
+
+    _, num_dims, _ = feature.size()
+
+    feature = feature.transpose(2,
+                                1).contiguous()  # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
+    neighbor_feat = feature.view(batch_size * num_points, -1)[idx, :]
+    neighbor_feat = neighbor_feat.view(batch_size, num_points, k, num_dims)
+    feature = feature.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
+
+    neighbor_feat = torch.cat((neighbor_feat - feature, feature), dim=3).permute(0, 3, 1, 2)
+
+    return neighbor_x, neighbor_feat
+
+
+class Mish(nn.Module):
+    '''new activation function'''
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def forward(ctx):
+        ctx = ctx * (torch.tanh(F.softplus(ctx)))
+        return ctx
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_grad = (torch.exp(ctx) * (4 * (ctx + 1) + 4 * torch.exp(2 * ctx) + torch.exp(3 * ctx) +
+                                        torch.exp(ctx) * (4 * ctx + 6))) / (2 * torch.exp(ctx) + torch.exp(2 * ctx) + 2)
+        return input_grad
+
+
+class PnP3D(nn.Module):
+    def __init__(self, input_features_dim):
+        super(PnP3D, self).__init__()
+
+        self.mish = Mish()
+
+        self.conv_mlp1 = nn.Conv2d(6, input_features_dim // 2, 1)
+        self.bn_mlp1 = nn.BatchNorm2d(input_features_dim // 2)
+
+        self.conv_mlp2 = nn.Conv2d(input_features_dim * 2, input_features_dim // 2, 1)
+        self.bn_mlp2 = nn.BatchNorm2d(input_features_dim // 2)
+
+        self.conv_down1 = nn.Conv1d(input_features_dim, input_features_dim // 8, 1, bias=False)
+        self.conv_down2 = nn.Conv1d(input_features_dim, input_features_dim // 8, 1, bias=False)
+
+        self.conv_up = nn.Conv1d(input_features_dim // 8, input_features_dim, 1)
+        self.bn_up = nn.BatchNorm1d(input_features_dim)
+
+    def forward(self, xyz, features, k):
+        # Local Context fusion
+        neighbor_xyz, neighbor_feat = get_neighbors(xyz, features, k=k)
+
+        neighbor_xyz = F.relu(self.bn_mlp1(self.conv_mlp1(neighbor_xyz)))  # B,C/2,N,k
+        neighbor_feat = F.relu(self.bn_mlp2(self.conv_mlp2(neighbor_feat)))  # B,C/2,N,k
+
+        f_encoding = torch.cat((neighbor_xyz, neighbor_feat), dim=1)  # B,C,N,k
+        f_encoding = f_encoding.max(dim=-1, keepdim=False)[0]  # B,C,N
+
+        # Global Bilinear Regularization
+        f_encoding_1 = F.relu(self.conv_down1(f_encoding))  # B,C/8,N
+        f_encoding_2 = F.relu(self.conv_down2(f_encoding))  # B,C/8,N
+
+        f_encoding_channel = f_encoding_1.mean(dim=-1, keepdim=True)[0]  # B,C/8,1
+        f_encoding_space = f_encoding_2.mean(dim=1, keepdim=True)[0]  # B,1,N
+        final_encoding = torch.matmul(f_encoding_channel, f_encoding_space)  # B,C/8,N
+        final_encoding = torch.sqrt(final_encoding + 1e-12)  # B,C/8,N
+        final_encoding = final_encoding + f_encoding_1 + f_encoding_2  # B,C/8,N
+        final_encoding = F.relu(self.bn_up(self.conv_up(final_encoding)))  # B,C,N
+
+        f_out = f_encoding - final_encoding
+
+        # Mish Activation
+        f_out = self.mish(f_out)
+
+        return f_out
 
 
 @MODELS.register_module()
@@ -227,15 +345,36 @@ class PointRCNNBboxHead(BaseModule):
             1, 2).unsqueeze(dim=3)
         merged_features = torch.cat((xyz_features, rpn_features), dim=1)
         merged_features = self.merge_down_layer(merged_features)
+
         l_xyz, l_features = [input_data[..., 0:3].contiguous()], \
-                            [merged_features.squeeze(dim=3)]
+            [merged_features.squeeze(dim=3)]
+
+        # 原始代码
+        # for i in range(len(self.SA_modules)):
+        #     li_xyz, li_features, cur_indices = \
+        #         self.SA_modules[i](l_xyz[i], l_features[i])
+        #     l_xyz.append(li_xyz)
+        #     l_features.append(li_features)
+
+        # 启用PnP3D模块
+        k = 16
         for i in range(len(self.SA_modules)):
             li_xyz, li_features, cur_indices = \
                 self.SA_modules[i](l_xyz[i], l_features[i])
-            l_xyz.append(li_xyz)
-            l_features.append(li_features)
+            if li_xyz is not None:
+                input_features_dim = li_features.shape[1]
+                block = PnP3D(input_features_dim).cuda()
+                coords = li_xyz.permute(0, 2, 1).contiguous()
+                li_features = block(coords, li_features, k)
+                k = int(k / 2)
+                l_xyz.append(li_xyz)
+                l_features.append(li_features)
+            else:
+                l_xyz.append(li_xyz)
+                l_features.append(li_features)
 
         shared_features = l_features[-1]
+
         x_cls = shared_features
         x_reg = shared_features
         x_cls = self.cls_convs(x_cls)
@@ -354,7 +493,7 @@ class PointRCNNBboxHead(BaseModule):
         # quadratic = abs_error.clamp(max=delta)
         # linear = (abs_error - quadratic)
         # corner_loss = 0.5 * quadratic**2 + delta * linear
-        loss = torch.where(abs_error < delta, 0.5 * abs_error**2 / delta,
+        loss = torch.where(abs_error < delta, 0.5 * abs_error ** 2 / delta,
                            abs_error - 0.5 * delta)
         return loss.mean(dim=1)
 
@@ -425,7 +564,7 @@ class PointRCNNBboxHead(BaseModule):
         # iou regression target
         label = (cls_pos_mask > 0).float()
         label[interval_mask] = (ious[interval_mask] - cfg.cls_neg_thr) / \
-            (cfg.cls_pos_thr - cfg.cls_neg_thr)
+                               (cfg.cls_pos_thr - cfg.cls_neg_thr)
         # label weights
         label_weights = (label >= 0).float()
         # box regression target
@@ -448,7 +587,7 @@ class PointRCNNBboxHead(BaseModule):
             ry_label = pos_gt_bboxes_ct[..., 6] % (2 * np.pi)  # 0 ~ 2pi
             is_opposite = (ry_label > np.pi * 0.5) & (ry_label < np.pi * 1.5)
             ry_label[is_opposite] = (ry_label[is_opposite] + np.pi) % (
-                2 * np.pi)  # (0 ~ pi/2, 3pi/2 ~ 2pi)
+                    2 * np.pi)  # (0 ~ pi/2, 3pi/2 ~ 2pi)
             flag = ry_label > np.pi
             ry_label[flag] = ry_label[flag] - np.pi * 2  # (-pi/2, pi/2)
             ry_label = torch.clamp(ry_label, min=-np.pi / 2, max=np.pi / 2)
@@ -568,7 +707,7 @@ class PointRCNNBboxHead(BaseModule):
             nms_func = nms_normal_bev
 
         assert box_probs.shape[
-            1] == self.num_classes, f'box_probs shape: {str(box_probs.shape)}'
+                   1] == self.num_classes, f'box_probs shape: {str(box_probs.shape)}'
         selected_list = []
         selected_labels = []
         boxes_for_nms = xywhr2xyxyr(input_meta['box_type_3d'](
